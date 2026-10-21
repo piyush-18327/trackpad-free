@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in Trackpad Free does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check the Troubleshooting section of the README first.
+  - type: dropdown
+    id: model
+    attributes:
+      label: Trackpad model
+      options:
+        - Magic Trackpad (USB-C, 2024)
+        - Magic Trackpad 2 (Lightning)
+        - Magic Trackpad (original)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options: [Bluetooth, USB cable]
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Win+R, run `winver`, and copy the version and build.
+      placeholder: Windows 11 24H2 (build 26100)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Trackpad Free version
+      description: Shown in the sidebar under the app name.
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Diagnostics tab → Copy diagnostics, then paste here. It contains device identifiers
+        (including your trackpad's Bluetooth address); remove anything you do not want public.
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: Install logs
+      description: Contents of driver-install.log or tray-install.log, if the problem is with setup.
+      render: text

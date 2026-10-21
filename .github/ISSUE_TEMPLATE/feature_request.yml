@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something Trackpad Free should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem or the Mac behavior you miss.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How should it work?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you use today

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Driver problems in MagicTrackpad2ForWindows itself
+    url: https://github.com/vitoplantamura/MagicTrackpad2ForWindows/issues
+    about: Crashes or multitouch bugs in the upstream precision driver belong there.

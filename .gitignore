@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+drivers/
+*.log
+dist/
+build/
+# Local test scratch files with machine-specific paths
+apply-test.ps1
+apply-test.json

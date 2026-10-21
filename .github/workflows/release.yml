@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Check the tag matches version.py
+        shell: bash
+        run: |
+          version="v$(python -c 'from version import __version__; print(__version__)')"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match version.py ($version)"; exit 1
+          fi
+      - name: Build source package
+        shell: bash
+        run: |
+          mkdir dist
+          git archive --format=zip --prefix="TrackpadFree-$GITHUB_REF_NAME/" \
+            -o "dist/TrackpadFree-$GITHUB_REF_NAME.zip" "$GITHUB_REF_NAME"
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "Trackpad Free $GITHUB_REF_NAME" --generate-notes
