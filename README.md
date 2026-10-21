@@ -42,6 +42,18 @@ display, a settings app) without a subscription.
    can write to, for example `%LOCALAPPDATA%\TrackpadFree`.
 3. Double-click `Start-TrackpadFree.cmd`, then follow the setup below.
 
+### Standalone exe (no Python needed)
+
+`python tools/build_exe.py` (after `python -m pip install pyinstaller`, ideally
+in a virtual environment) builds `dist/TrackpadFree.exe`: one windowed,
+unsigned executable that runs the app, the tray and the driver helpers by
+relaunching itself. It keeps driver downloads and logs in
+`%LOCALAPPDATA%\TrackpadFree`. If you set up the tray icon from the exe, the
+sign-in task runs that exe with administrator rights, so keep it somewhere only
+you can write to and use **Remove** before moving or deleting it. Windows
+SmartScreen or antivirus may warn about an unsigned PyInstaller exe the first
+time.
+
 ## What works today
 
 | Feature | Status |
@@ -108,7 +120,8 @@ only one precision driver can claim the device.
 - `touchpad_settings.py`, `gesture_mapping.json` — restorable Windows touchpad settings (Mac preset, gesture conflicts)
 - `Install-Tray.ps1` — registers or removes the elevated sign-in task for the tray
 - `tests/` — hardware-free unit tests, run by GitHub Actions on Windows
-- `tools/` — icon generator and README screenshot capture (demo data only)
+- `tools/` — icon generator, README screenshot capture (demo data only) and `build_exe.py`
+- `runtime.py`, `trackpadfree.py` — how entry points start from source or from `TrackpadFree.exe`
 - `THIRD_PARTY.md` — credits, licenses, and the exact driver interfaces used
 
 ## Uninstall

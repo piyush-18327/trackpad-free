@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 from ctypes import wintypes
-from pathlib import Path
 import subprocess
 import sys
 import threading
@@ -18,9 +17,8 @@ import threading
 from driver_backend import run_helper as backend
 from gesture_host import GestureHost
 from hidraw import WM_INPUT, WM_INPUT_DEVICE_CHANGE
+import runtime
 
-ROOT = Path(__file__).resolve().parent
-PYTHONW = str(Path(sys.executable).with_name("pythonw.exe"))
 TASK = r"\TrackpadFree\Trackpad Free Tray"
 
 WM_DESTROY, WM_CLOSE, WM_TIMER, WM_NULL = 0x0002, 0x0010, 0x0113, 0x0000
@@ -292,7 +290,7 @@ class Tray:
 
     def open_app(self) -> None:
         # Launched from the elevated tray, the app inherits admin rights too.
-        subprocess.Popen([PYTHONW if Path(PYTHONW).exists() else sys.executable, str(ROOT / "app.py")], cwd=ROOT)
+        subprocess.Popen(runtime.command("app", windowed=True), cwd=runtime.home())
 
     def _window_proc(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:
         if message == WM_INPUT:
@@ -350,7 +348,7 @@ class Tray:
             user32.DispatchMessageW(ctypes.byref(message))
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--low", type=int, default=20, help="Warn at or below this battery percentage (default 20)")
     parser.add_argument("--interval", type=int, default=300, help="Seconds between battery readings (default 300)")
@@ -363,7 +361,12 @@ if __name__ == "__main__":
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except (AttributeError, OSError):
         pass
-    mutex = kernel32.CreateMutexW(None, False, "Local\\TrackpadFreeTray")
+    mutex = kernel32.CreateMutexW(None, False, "Local\\TrackpadFreeTray")  # held until run() returns
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         sys.exit(0)  # already running
     Tray(args.low, args.interval).run()
+    del mutex
+
+
+if __name__ == "__main__":
+    main()

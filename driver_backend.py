@@ -11,14 +11,12 @@ import ctypes
 from ctypes import wintypes
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import winreg
 
-PYTHON = str(Path(sys.executable).with_name("python.exe"))
-if not Path(PYTHON).exists():
-    PYTHON = sys.executable
+import runtime
+
 DEVICE = r"\\.\AmtPtpControlDeviceUm"
 REGISTRY_KEY = r"SYSTEM\CurrentControlSet\Services\AmtPtpHidFilter\Parameters"
 IOCTL_RELOAD = (0x22 << 16) | (0x800 << 2)
@@ -143,7 +141,7 @@ def apply_settings(settings: dict) -> dict:
 
 def run_helper(settings: dict | None = None) -> dict:
     """Run this module as a subprocess with a timeout and return its JSON."""
-    command = [PYTHON, str(Path(__file__).resolve())]
+    command = runtime.command("driver-helper")
     if settings is not None:
         command += ["--apply", json.dumps(settings)]
     result = subprocess.run(
@@ -159,7 +157,7 @@ def run_helper(settings: dict | None = None) -> dict:
     return data
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", metavar="JSON", help="Apply settings; requires administrator rights")
     parser.add_argument("--apply-file", metavar="PATH", help="Apply settings read from a JSON file")
@@ -175,3 +173,7 @@ if __name__ == "__main__":
     except (OSError, ValueError, TypeError) as error:
         print(json.dumps({"error": str(error)}))
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -3,6 +3,17 @@
 All notable changes to Trackpad Free. Versions follow `version.py`; release
 tags are `v<version>`.
 
+## [Unreleased]
+
+### Added
+- `tools/build_exe.py` builds a standalone `TrackpadFree.exe` (PyInstaller,
+  one file). The exe relaunches itself for the tray and driver helpers and
+  keeps downloads and logs in `%LOCALAPPDATA%\TrackpadFree`.
+
+### Changed
+- `Install-Driver.ps1` and `Install-Tray.ps1` take the program, entry point
+  and log folder as parameters (defaults unchanged when run from source).
+
 ## [0.4.0] – 2026-10-21
 
 ### Added

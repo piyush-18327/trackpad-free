@@ -1,16 +1,30 @@
-param([string]$Python = 'python.exe')
+param(
+    [string]$Python = 'python.exe',
+    # driver_package.py from source, or --run=driver-package for TrackpadFree.exe
+    [string]$Entry = '',
+    [string]$LogDir = ''
+)
 
 $ErrorActionPreference = 'Stop'
-$log = Join-Path $PSScriptRoot 'driver-install.log'
+if (-not $Entry) { $Entry = Join-Path $PSScriptRoot 'driver_package.py' }
+if (-not $LogDir) { $LogDir = $PSScriptRoot }
+$log = Join-Path $LogDir 'driver-install.log'
 try {
     "Trackpad Free driver installation - $(Get-Date -Format o)" | Set-Content $log -Encoding UTF8
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $admin) { throw 'Run this installer as administrator.' }
     if ([Environment]::OSVersion.Version.Build -lt 22000) { throw 'This signed package requires Windows 11.' }
 
-    $result = & $Python (Join-Path $PSScriptRoot 'driver_package.py') --verify 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Package verification failed: $result" }
-    $inf = [string]($result | Select-Object -Last 1)
+    # Start-Process -Wait, not `& $Python`: PowerShell does not wait for a windowed
+    # exe (TrackpadFree.exe) or collect its exit code when called with &.
+    $out = Join-Path $LogDir 'driver-verify.out'
+    $err = Join-Path $LogDir 'driver-verify.err'
+    $process = Start-Process -FilePath $Python -ArgumentList @("`"$Entry`"", '--verify') -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $out -RedirectStandardError $err
+    $result = @(Get-Content $out) + @(Get-Content $err)
+    Remove-Item $out, $err -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0) { throw "Package verification failed: $($result -join ' ')" }
+    $inf = [string]($result | Select-Object -First 1)
     $catalog = Join-Path (Split-Path $inf) 'AmtPtpDevice.cat'
     $signature = Get-AuthenticodeSignature $catalog
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Windows Hardware Compatibility Publisher') {

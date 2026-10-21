@@ -1,13 +1,20 @@
 param(
     [Parameter(Mandatory)][string]$User,
     [string]$Pythonw = 'pythonw.exe',
+    # tray.py from source, or --run=tray for TrackpadFree.exe
+    [string]$Entry = '',
+    [string]$WorkDir = '',
+    [string]$LogDir = '',
     [switch]$Remove
 )
 
 # Registers (or removes) a sign-in task that starts the tray icon with highest
 # privileges, so battery reading works without a UAC prompt each time.
 $ErrorActionPreference = 'Stop'
-$log = Join-Path $PSScriptRoot 'tray-install.log'
+if (-not $Entry) { $Entry = Join-Path $PSScriptRoot 'tray.py' }
+if (-not $WorkDir) { $WorkDir = $PSScriptRoot }
+if (-not $LogDir) { $LogDir = $PSScriptRoot }
+$log = Join-Path $LogDir 'tray-install.log'
 $taskPath = '\TrackpadFree\'
 $taskName = 'Trackpad Free Tray'
 try {
@@ -25,10 +32,10 @@ try {
         exit 0
     }
 
-    $tray = Join-Path $PSScriptRoot 'tray.py'
-    if (-not (Test-Path $tray)) { throw "Missing $tray" }
+    $tray = $Entry
+    if (-not $tray.StartsWith('--run=') -and -not (Test-Path $tray)) { throw "Missing $tray" }
     $python = (Get-Command $Pythonw).Source
-    $action = New-ScheduledTaskAction -Execute $python -Argument "`"$tray`"" -WorkingDirectory $PSScriptRoot
+    $action = New-ScheduledTaskAction -Execute $python -Argument "`"$tray`"" -WorkingDirectory $WorkDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $User
     $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

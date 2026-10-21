@@ -16,8 +16,9 @@ from tkinter import messagebox, ttk
 import webbrowser
 
 from devices import find_trackpads, has_precision_driver
-from driver_backend import DEFAULTS, FEEDBACK, PYTHON, is_admin, run_helper as backend
+from driver_backend import DEFAULTS, FEEDBACK, is_admin, run_helper as backend
 from driver_package import PACKAGE_DIR, RELEASE, prepare_package
+import runtime
 import tray
 import ui
 import gesture_config
@@ -25,8 +26,8 @@ import touchpad_settings
 from gestures import DEFAULTS as GESTURE_DEFAULTS, TOGGLES, validate as validate_gestures
 from version import __version__
 
-ROOT = Path(__file__).resolve().parent
-ASSETS = ROOT / "assets"
+ASSETS = runtime.RESOURCES / "assets"
+POWERSHELL = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]
 GESTURE_STATUS_STALE = 75  # seconds; the tray rewrites its status at least every 30 s
 THEME_LABELS = {"system": "Match Windows", "light": "Light", "dark": "Dark"}
 WINDOWS_THEME_CHECK = 3000  # ms between checks of the Windows app mode in Match Windows mode
@@ -75,7 +76,7 @@ def elevate(executable: str, arguments: list[str]) -> None:
     shell = ctypes.WinDLL("shell32", use_last_error=True)
     shell.ShellExecuteW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
     shell.ShellExecuteW.restype = ctypes.c_void_p
-    result = shell.ShellExecuteW(None, "runas", executable, subprocess.list2cmdline(arguments), str(ROOT), 1)
+    result = shell.ShellExecuteW(None, "runas", executable, subprocess.list2cmdline(arguments), str(runtime.home()), 1)
     if not result or result <= 32:
         raise OSError("The administrator request was cancelled or could not be started.")
 
@@ -423,7 +424,7 @@ class TrackpadApp(tk.Tk):
         links = ttk.Frame(about)
         links.pack(fill="x", pady=(px(14), 0))
         ttk.Button(links, text="Upstream release & instructions", command=lambda: webbrowser.open(RELEASE)).pack(side="left")
-        ttk.Button(links, text="Licenses & credits", command=lambda: self._open(str(ROOT / "THIRD_PARTY.md"))).pack(side="left", padx=px(8))
+        ttk.Button(links, text="Licenses & credits", command=lambda: self._open(str(runtime.RESOURCES / "THIRD_PARTY.md"))).pack(side="left", padx=px(8))
 
     def _update_setup_state(self, precision: bool) -> None:
         downloaded = PACKAGE_DIR.exists()
@@ -643,7 +644,9 @@ class TrackpadApp(tk.Tk):
             self.notice.configure(text="Prepare the driver package first.")
             return
         try:
-            elevate("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "Install-Driver.ps1"), "-Python", PYTHON])
+            # The verify step runs as `<Python> <Entry> --verify`: the script or the exe with --run.
+            elevate("powershell.exe", POWERSHELL + [str(runtime.RESOURCES / "Install-Driver.ps1"), "-Python", runtime.interpreter(),
+                                                    "-Entry", *runtime.entry_args("driver-package"), "-LogDir", str(runtime.home())])
         except OSError as error:
             self.notice.configure(text=str(error))
             return
@@ -651,8 +654,9 @@ class TrackpadApp(tk.Tk):
 
     def tray_setup(self, remove: bool) -> None:
         user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}"
-        arguments = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "Install-Tray.ps1"),
-                     "-User", user, "-Pythonw", str(Path(PYTHON).with_name("pythonw.exe"))]
+        arguments = POWERSHELL + [str(runtime.RESOURCES / "Install-Tray.ps1"), "-User", user,
+                                  "-Pythonw", runtime.interpreter(windowed=True), "-Entry", *runtime.entry_args("tray"),
+                                  "-WorkDir", str(runtime.home()), "-LogDir", str(runtime.home())]
         try:
             elevate("powershell.exe", arguments + (["-Remove"] if remove else []))
         except OSError as error:
@@ -669,7 +673,7 @@ class TrackpadApp(tk.Tk):
         self.notice.configure(text="Tray icon started. Look for the battery percentage in the notification area.")
 
     def show_install_log(self) -> None:
-        path = ROOT / "driver-install.log"
+        path = runtime.HOME / "driver-install.log"
         if not path.exists():
             self.notice.configure(text="No installation log yet. Install the prepared driver first.")
             return
@@ -686,7 +690,8 @@ class TrackpadApp(tk.Tk):
 
     def restart_elevated(self) -> None:
         try:
-            elevate(PYTHON, [str(ROOT / "app.py")])
+            executable, *arguments = runtime.command("app", windowed=True)
+            elevate(executable, arguments)
         except OSError as error:
             self.notice.configure(text=str(error))
             return
@@ -704,7 +709,7 @@ class TrackpadApp(tk.Tk):
         self.notice.configure(text="Diagnostics copied. Device identifiers are included.")
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--diagnose", action="store_true", help="Print device/driver status and exit")
     args = parser.parse_args()
@@ -712,3 +717,7 @@ if __name__ == "__main__":
         print(json.dumps(snapshot(), indent=2, ensure_ascii=True))
     else:
         TrackpadApp().mainloop()
+
+
+if __name__ == "__main__":
+    main()

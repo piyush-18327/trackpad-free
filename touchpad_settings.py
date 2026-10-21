@@ -14,6 +14,7 @@ import sys
 import winreg
 
 from gesture_config import atomic_json, data_dir
+import runtime
 
 KEY = r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad"
 SPI_GET, SPI_SET = 0xAE, 0xAF
@@ -118,7 +119,7 @@ def mapping():
     values: every write is read back and restorable, and mapping_note() asks
     the user to confirm the result in Settings after signing in.
     """
-    path = Path(__file__).with_name("gesture_mapping.json")
+    path = runtime.RESOURCES / "gesture_mapping.json"
     try:
         m = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

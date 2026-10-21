@@ -10,8 +10,9 @@ from pathlib import Path
 import urllib.request
 import zipfile
 
-ROOT = Path(__file__).resolve().parent
-PACKAGE_DIR = ROOT / "drivers" / "v2.2"
+import runtime
+
+PACKAGE_DIR = runtime.HOME / "drivers" / "v2.2"  # writable: next to the source, or %LOCALAPPDATA% for the exe
 RELEASE = "https://github.com/vitoplantamura/MagicTrackpad2ForWindows/releases/tag/v2.2"
 ARCHIVE_NAME = "MT2FW11-20261012-MSSigned.zip"
 DOWNLOAD = RELEASE.replace("/tag/", "/download/") + "/" + ARCHIVE_NAME
@@ -88,7 +89,7 @@ def prepare_package() -> Path:
     return verify_package()
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify", action="store_true", help="Check cached files without downloading")
     args = parser.parse_args()
@@ -96,3 +97,7 @@ if __name__ == "__main__":
         print(verify_package() if args.verify else prepare_package())
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, KeyError) as error:
         parser.exit(1, f"{error}\n")
+
+
+if __name__ == "__main__":
+    main()
