@@ -10,6 +10,7 @@ from pathlib import Path
 import queue
 import subprocess
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 import webbrowser
@@ -19,10 +20,14 @@ from driver_backend import DEFAULTS, FEEDBACK, PYTHON, is_admin, run_helper as b
 from driver_package import PACKAGE_DIR, RELEASE, prepare_package
 import tray
 import ui
+import gesture_config
+import touchpad_settings
+from gestures import DEFAULTS as GESTURE_DEFAULTS, TOGGLES, validate as validate_gestures
 from version import __version__
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT / "assets"
+GESTURE_STATUS_STALE = 75  # seconds; the tray rewrites its status at least every 30 s
 
 
 def snapshot() -> dict:
@@ -35,7 +40,16 @@ def snapshot() -> dict:
         tray_task = tray.task_installed()
     except (OSError, subprocess.SubprocessError):
         tray_task = False
-    return {"devices": devices, "precision_driver": has_precision_driver(devices), "driver": driver, "tray_task": tray_task}
+    try:
+        gesture_status = json.loads((gesture_config.data_dir()/"gesture-status.json").read_text(encoding="utf-8"))
+        stale = time.time() - gesture_status.get("updated", 0) > GESTURE_STATUS_STALE
+    except (OSError, ValueError):
+        gesture_status, stale = {}, True
+    if stale:
+        gesture_status["message"] = "The tray isn't running, so custom gestures are paused. Start the tray to use them."
+        if touchpad_settings.two_finger_tap_held():
+            gesture_status["message"] += " Two-finger tap right-click stays off until the tray starts, or until you turn smart zoom off and Save."
+    return {"devices": devices, "precision_driver": has_precision_driver(devices), "driver": driver, "tray_task": tray_task, "gestures": gesture_status}
 
 
 def elevate(executable: str, arguments: list[str]) -> None:
@@ -71,11 +85,13 @@ class TrackpadApp(tk.Tk):
         self.tabs.pack(fill="both", expand=True)
         self.overview = ttk.Frame(self.tabs)
         self.settings_tab = ttk.Frame(self.tabs)
+        self.gesture_tab = ttk.Frame(self.tabs)
         self.setup_tab = ttk.Frame(self.tabs)
         self.diagnostics_tab = ttk.Frame(self.tabs)
         pages = (
             (self.overview, "My trackpad", "Battery, connection and tray alerts at a glance."),
             (self.settings_tab, "Click & precision", "Haptic click strength and pointer rejection, applied by the driver."),
+            (self.gesture_tab, "Gestures", "Mac-style actions, recognized locally by the tray. Off until you enable them."),
             (self.setup_tab, "Driver setup", "Install the free, Microsoft-signed precision touchpad driver."),
             (self.diagnostics_tab, "Diagnostics", "What Windows reports about your trackpad and its driver."),
         )
@@ -83,6 +99,7 @@ class TrackpadApp(tk.Tk):
             self.tabs.add(frame, text=label, subtitle=subtitle)
         self._build_overview()
         self._build_settings()
+        self._build_gestures()
         self._build_setup()
         self._build_diagnostics()
 
@@ -143,8 +160,13 @@ class TrackpadApp(tk.Tk):
 
         tray_card = ui.Card(row, title="Tray icon & alerts")
         tray_card.grid(row=0, column=1, sticky="nsew", padx=(px(8), 0))
-        self.pill_tray = ttk.Label(tray_card, text="Checking", style="Neutral.Pill.TLabel")
-        self.pill_tray.pack(anchor="w", pady=(px(10), px(8)))
+        status_row = ttk.Frame(tray_card)
+        status_row.pack(fill="x", pady=(px(10), px(8)))
+        self.pill_tray = ttk.Label(status_row, text="Checking", style="Neutral.Pill.TLabel")
+        self.pill_tray.pack(side="left")
+        # Low-emphasis action beside the status, so the button row always fits.
+        self.tray_remove = ttk.Button(status_row, text="Remove", style="Link.TButton", state="disabled", command=lambda: self.tray_setup(True))
+        self.tray_remove.pack(side="right")
         self.tray_note = ui.WrapLabel(tray_card, text="Checking tray setup…", style="Muted.TLabel")
         self.tray_note.pack(fill="x")
         tray_actions = ttk.Frame(tray_card)
@@ -153,8 +175,6 @@ class TrackpadApp(tk.Tk):
         self.tray_setup_button.pack(side="left")
         self.tray_start = ttk.Button(tray_actions, text="Start now", state="disabled", command=self.tray_run)
         self.tray_start.pack(side="left", padx=px(8))
-        self.tray_remove = ttk.Button(tray_actions, text="Remove", style="Link.TButton", state="disabled", command=lambda: self.tray_setup(True))
-        self.tray_remove.pack(side="left")
 
         layout = {"stacked": None}
 
@@ -174,6 +194,13 @@ class TrackpadApp(tk.Tk):
         self.gestures_card = ui.Card(page, title="Gestures", subtitle="Windows Precision Touchpad handles two-finger scrolling, pinch-to-zoom, taps, and three- and four-finger swipes once the driver is installed.")
         self.gestures_card.pack(fill="x", pady=(px(16), 0))
         ttk.Button(self.gestures_card, text="Open Windows gesture settings", command=lambda: self._open("ms-settings:devices-touchpad")).pack(anchor="w", pady=(px(14), 0))
+        preset = ttk.Frame(self.gestures_card)
+        preset.pack(fill="x", pady=(px(10), 0))
+        self.mac_button = ttk.Button(preset, text="Apply Mac preset", command=lambda: self.mac_preset(False))
+        self.mac_button.pack(side="left")
+        self.mac_restore = ttk.Button(preset, text="Restore previous", command=lambda: self.mac_preset(True))
+        self.mac_restore.pack(side="left", padx=px(8))
+        ui.WrapLabel(self.gestures_card, text="Natural scroll, taps and right-click; three-finger Task View / desktop / desktop switching. Basic options apply live. Swipe mappings need sign-out/in. Applies to all precision touchpads for this user.", style="Small.TLabel").pack(fill="x", pady=(px(8), 0))
 
         actions = ttk.Frame(page)
         actions.pack(fill="x", pady=(px(16), 0))
@@ -232,6 +259,79 @@ class TrackpadApp(tk.Tk):
     def _sync_threshold(self) -> None:
         uses_threshold = self.stop_mode.get() in ("Pressure threshold", "Contact size threshold")
         self.threshold_box.configure(state="normal" if uses_threshold else "disabled")
+
+    def _build_gestures(self):
+        px, page = ui.px, self.gesture_tab
+        try:
+            values = gesture_config.load()
+            note = "Each gesture is opt-in. The tray reloads saved preferences within one second."
+        except (OSError, ValueError) as error:
+            values = GESTURE_DEFAULTS.copy()
+            note = f"Could not load gesture preferences: {error}. Gestures are off."
+        self.gesture_vars = {k: tk.BooleanVar(value=values[k]) for k in TOGGLES}
+        self.gesture_values = values
+        self.gesture_status = ui.WrapLabel(page, text=note, style="Muted.TLabel")
+        self.gesture_status.pack(fill="x", pady=(0, px(12)))
+        card = ui.Card(page, title="Extra gestures", subtitle="Raw contacts are read from your USB-C trackpad. Windows keeps ordinary pointer movement and two-finger scrolling.")
+        card.pack(fill="x")
+        labels = {
+            "three_finger_drag": "Three-finger drag — move promptly to pick up; lift to release",
+            "smart_zoom": "Smart zoom — two-finger double-tap: Ctrl+Plus / Ctrl+0",
+            "notification_center": "Notification Center — two fingers swipe inward from right edge",
+            "launchpad": "Launchpad — four-finger pinch: Start; spread: desktop",
+            "lookup": "Look up — three-finger tap: define the word under the pointer on Bing",
+        }
+        for name, label in labels.items():
+            ttk.Checkbutton(card, text=label, variable=self.gesture_vars[name]).pack(anchor="w", pady=px(4))
+        ui.WrapLabel(card, text="Look up reads the word through Windows accessibility (UI Automation): nothing is clicked or typed, the clipboard is untouched, and password fields are skipped. Apps that don't expose their text do nothing. Smart zoom delays a single two-finger tap's right-click to tell it apart from a double-tap; while the tray runs it takes over Windows' two-finger tap and gives it back when it stops. The physical two-finger click stays native.", style="Small.TLabel").pack(fill="x", pady=(px(8), 0))
+        tuning = ui.Card(page, title="Timing & sensitivity")
+        tuning.pack(fill="x", pady=(px(16), 0))
+        self.gesture_numbers = {}
+        for name, label in (("drag_release_delay", "Drag release grace (seconds)"), ("tap_max_time", "Maximum tap duration (seconds)"), ("tap_max_movement", "Maximum tap movement (surface fraction)"), ("edge_width", "Right-edge width (surface fraction)"), ("pointer_scale", "Drag pointer travel (pixels / surface)")):
+            row = ttk.Frame(tuning)
+            row.pack(fill="x", pady=px(3))
+            ttk.Label(row, text=label).pack(side="left")
+            variable = tk.StringVar(value=str(values[name]))
+            self.gesture_numbers[name] = variable
+            ttk.Entry(row, textvariable=variable, width=10).pack(side="right")
+        ui.WrapLabel(tuning, text="0.025 = 2.5% of the surface; default drag grace is 0.5 s. A slow three-finger rest never starts a drag.", style="Small.TLabel").pack(fill="x", pady=(px(8), 0))
+        conflict = ui.Card(page, title="Windows gesture conflicts")
+        conflict.pack(fill="x", pady=(px(16), 0))
+        ui.WrapLabel(conflict, text="Three-finger drag sets Windows' three-finger actions to Nothing and moves Mac swipes to four fingers. Look up disables Windows' three-finger tap. Launchpad disables native four-finger swipes; this engine supplies Mac swipes when the Mac preset or three-finger drag is enabled. Registry changes require sign-out/in; the engine waits before injecting. Turn features off and Save to restore their previous Windows settings.", style="Muted.TLabel").pack(fill="x")
+        actions = ttk.Frame(page)
+        actions.pack(fill="x", pady=px(16))
+        self.gesture_save = ttk.Button(actions, text="Save gestures", style="Accent.TButton", command=self.save_gestures)
+        self.gesture_save.pack(side="left")
+        ttk.Button(actions, text="Turn all off in form", command=lambda: [v.set(False) for v in self.gesture_vars.values()]).pack(side="left", padx=px(8))
+
+    def mac_preset(self, restore):
+        if self.busy:
+            return
+        text = ("Restore the Windows touchpad settings saved before Apply Mac preset? Swipe changes need sign-out/in."
+                if restore else "Apply natural scrolling, tap-to-click and two-finger right-click, with three-finger Task View / show desktop / switch desktops? Your previous settings will be saved. Swipe changes need sign-out/in.")
+        if not messagebox.askokcancel("Windows touchpad settings", text, parent=self):
+            return
+        self._work("Restoring touchpad settings…" if restore else "Applying Mac preset…",
+                   touchpad_settings.restore_mac if restore else touchpad_settings.apply_mac,
+                   lambda message: self.notice.configure(text=message))
+
+    def save_gestures(self):
+        if self.busy:
+            return
+        try:
+            values = {**self.gesture_values, **{k:v.get() for k,v in self.gesture_vars.items()},
+                      **{k:float(v.get()) for k,v in self.gesture_numbers.items()}}
+            values = validate_gestures(values)
+        except ValueError as error:
+            messagebox.showerror("Invalid gesture setting", str(error), parent=self)
+            return
+        if not messagebox.askokcancel("Save gestures & Windows conflicts", "Save these gestures and adjust or restore Windows tap/swipe actions as described above? New registry swipe mappings require sign-out/in. Look up sends the word under the pointer to Bing when you perform the gesture.", parent=self):
+            return
+        def done(message):
+            self.gesture_values = values
+            self.notice.configure(text=message)
+            self.gesture_status.configure(text=message)
+        self._work("Saving gestures and Windows conflict settings…", lambda: touchpad_settings.configure_gestures(values), done)
 
     def _build_setup(self) -> None:
         page, px = self.setup_tab, ui.px
@@ -312,7 +412,7 @@ class TrackpadApp(tk.Tk):
         self.notice.configure(text=label)
         self.busy_bar.pack(side="right", padx=(0, ui.px(12)), before=self.notice)
         self.busy_bar.start(12)
-        for button in (self.refresh_button, self.apply_button, self.prepare_button, self.install_button):
+        for button in (self.refresh_button, self.apply_button, self.prepare_button, self.install_button, self.mac_button, self.mac_restore, self.gesture_save):
             button.configure(state="disabled")
 
         def worker() -> None:
@@ -332,7 +432,7 @@ class TrackpadApp(tk.Tk):
             self.busy = False
             self.busy_bar.stop()
             self.busy_bar.pack_forget()
-            for button in (self.refresh_button, self.prepare_button, self.install_button):
+            for button in (self.refresh_button, self.prepare_button, self.install_button, self.mac_button, self.mac_restore, self.gesture_save):
                 button.configure(state="normal")
             if error:
                 self.notice.configure(text=f"Operation failed: {error}")
@@ -395,6 +495,8 @@ class TrackpadApp(tk.Tk):
         for button in (self.tray_start, self.tray_remove):
             button.configure(state="normal" if installed else "disabled")
         self._update_setup_state(data["precision_driver"])
+        if data.get("gestures"):
+            self.gesture_status.configure(text=data["gestures"].get("message", "No gesture status yet."))
         self._set_diagnostics(json.dumps(data, indent=2, ensure_ascii=False))
         self.notice.configure(text=f"Updated · {len(devices)} trackpad-related Windows interfaces found.")
         self._update_apply()

@@ -29,6 +29,7 @@ display, a settings app) without a subscription.
 | Light | Dark |
 | --- | --- |
 | ![Click and precision settings](docs/screenshots/light-click-precision.png) | ![My trackpad page in dark mode](docs/screenshots/dark-my-trackpad.png) |
+| ![Mac gestures](docs/screenshots/light-gestures.png) | ![Mac gestures in dark mode](docs/screenshots/dark-gestures.png) |
 | ![Driver setup](docs/screenshots/light-driver-setup.png) | ![Click and precision settings in dark mode](docs/screenshots/dark-click-precision.png) |
 
 ## Download
@@ -49,6 +50,8 @@ display, a settings app) without a subscription.
 | Windows Precision Touchpad gestures (2-finger scroll, pinch, 3/4-finger) | ✅ via the precision driver |
 | Battery percentage over Bluetooth | ✅ once driver installed (tray icon, or app as admin) |
 | Tray icon with battery %, low-battery alerts at 20% and 10% | ✅ one-time admin setup, then no prompts |
+| Mac preset for Windows' own gestures (Task View, show desktop, switch desktops) | ✅ restorable; swipe changes need sign-out/in |
+| Mac gestures: three-finger drag, smart zoom, Notification Center edge swipe, Launchpad pinch, Look up | ✅ opt-in, run by the tray — see [docs/gestures.md](docs/gestures.md) |
 | Click strength / silent clicking | ✅ once driver installed (admin) |
 | Palm rejection, near-finger rejection options | ✅ once driver installed (admin) |
 | Pointer-speed, tap-to-click, scroll direction, gesture assignment | ✅ handled by Windows Settings (link in the app) |
@@ -71,6 +74,12 @@ display, a settings app) without a subscription.
    the notification area at every sign-in without another prompt. Right-click
    the icon to refresh, open the app (already elevated) or exit.
 6. For click settings without the tray, use **Open as administrator**.
+7. Optional Mac gestures: on **My trackpad**, **Apply Mac preset** sets
+   Windows' own three-finger gestures like a Mac. On the **Gestures** page,
+   tick the gestures you want and click **Save**. Gestures that change
+   Windows' three- or four-finger actions take effect after you sign out and
+   back in; the tray must be running. Details and the exact Windows settings
+   changed are in [docs/gestures.md](docs/gestures.md).
 
 The tray task runs `tray.py` from this folder with administrator rights, so
 anyone who can edit this folder can run code as administrator. Keep it in a
@@ -90,7 +99,12 @@ only one precision driver can claim the device.
 - `driver_backend.py` — battery/settings client for the upstream driver
 - `driver_package.py` — pinned download + SHA-256 + path-safe extraction
 - `Install-Driver.ps1` — elevated installer with signature verification
-- `tray.py` — dependency-free notification-area icon (battery %, low alerts)
+- `tray.py` — dependency-free notification-area icon (battery %, low alerts) that also hosts the gesture engine
+- `gestures.py` — pure gesture recogniser (contact frames in, actions out)
+- `hidraw.py` — Raw Input + HID parsing of the trackpad's multitouch contacts
+- `gesture_host.py`, `gesture_input.py`, `gesture_config.py` — tray integration, `SendInput` output, saved preferences
+- `uia.py` — UI Automation word lookup for the Look up gesture (no input sent)
+- `touchpad_settings.py`, `gesture_mapping.json` — restorable Windows touchpad settings (Mac preset, gesture conflicts)
 - `Install-Tray.ps1` — registers or removes the elevated sign-in task for the tray
 - `tests/` — hardware-free unit tests, run by GitHub Actions on Windows
 - `tools/` — icon generator and README screenshot capture (demo data only)
@@ -127,6 +141,13 @@ releases, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 - **Battery shows “—”**: the upstream control device is restricted to
   administrators; set up the tray icon or restart Trackpad Free as administrator.
 - **Tray icon missing**: click **Start tray now**, or check `tray-install.log`.
+- **Mac gestures do nothing**: the Gestures page shows the tray's status. If
+  it asks you to sign out and in, do that once; if it says the tray isn't
+  running, start it from **My trackpad**. Look up only works in apps that
+  expose their text to Windows accessibility.
+- **Two-finger tap stopped right-clicking**: smart zoom takes over two-finger
+  taps while the tray runs. Start the tray, or turn smart zoom off and click
+  **Save** to give the tap back to Windows.
 - **Conflicting gesture behavior**: uninstall Magic Utilities / Trackpad++ /
   the 2021 Apple Boot Camp driver first (Device Manager → Human Interface
   Devices → uninstall with driver software), then reinstall this driver.

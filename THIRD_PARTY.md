@@ -45,3 +45,19 @@ model as Bluetooth version `0x314`.
 
 Device discovery uses the built-in PowerShell `Get-PnpDevice` /
 `Get-PnpDeviceProperty` cmdlets. Nothing is installed for discovery.
+
+The gesture features use only documented Windows APIs through `ctypes`:
+
+- Raw Input (`RegisterRawInputDevices`, `GetRawInputData`) and the HID
+  parsing library in `hid.dll` (`HidP_GetUsageValue`, `HidP_GetUsages`) to
+  read the precision touchpad's contacts, following the HID Usage Tables for
+  digitizers (usage page 0x0D).
+- `SendInput` to perform gesture actions.
+- UI Automation (`IUIAutomation`, `TextPattern`) to read the word under the
+  pointer for Look up.
+- `SystemParametersInfo(SPI_GETTOUCHPADPARAMETERS / SPI_SETTOUCHPADPARAMETERS)`
+  and the per-user `PrecisionTouchPad` registry key for touchpad settings.
+  The registry values were measured on Windows 11 build 26200 by diffing
+  Settings changes; see [docs/gestures.md](docs/gestures.md).
+
+No code was taken from other gesture utilities.

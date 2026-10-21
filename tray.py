@@ -16,6 +16,8 @@ import sys
 import threading
 
 from driver_backend import run_helper as backend
+from gesture_host import GestureHost
+from hidraw import WM_INPUT, WM_INPUT_DEVICE_CHANGE
 
 ROOT = Path(__file__).resolve().parent
 PYTHONW = str(Path(sys.executable).with_name("pythonw.exe"))
@@ -192,6 +194,7 @@ class Tray:
         self.polling = False
         self.warned_low = self.warned_critical = False
         self.icon = 0
+        self.gestures = None
         self.taskbar_created = user32.RegisterWindowMessageW("TaskbarCreated")
         self.proc = WNDPROC(self._window_proc)  # keep a reference for the lifetime of the window
         instance = kernel32.GetModuleHandleW(None)
@@ -205,6 +208,9 @@ class Tray:
             user32.ChangeWindowMessageFilterEx(self.hwnd, message, 1, None)
         self._notify(NIM_ADD)
         user32.SetTimer(self.hwnd, 1, interval * 1000, None)
+        self.gestures = GestureHost(self.hwnd)
+        self.gesture_interval = self.gestures.interval
+        user32.SetTimer(self.hwnd, 2, self.gesture_interval, None)
         self.poll()
 
     def _data(self, flags: int) -> NOTIFYICONDATAW:
@@ -289,6 +295,15 @@ class Tray:
         subprocess.Popen([PYTHONW if Path(PYTHONW).exists() else sys.executable, str(ROOT / "app.py")], cwd=ROOT)
 
     def _window_proc(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:
+        if message == WM_INPUT:
+            if self.gestures:
+                self.gestures.raw_input(lparam)
+            # Mandatory foreground raw-input cleanup. Never consume normal input.
+            return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+        if message == WM_INPUT_DEVICE_CHANGE:
+            if self.gestures:
+                self.gestures.devices_changed()
+            return 0
         if message == WM_TRAY:
             if lparam == WM_RBUTTONUP:
                 self._menu()
@@ -299,7 +314,15 @@ class Tray:
             self._show_result()
             return 0
         if message == WM_TIMER:
-            self.poll()
+            if wparam == 2:
+                if self.gestures:
+                    self.gestures.tick()
+                    # 16 ms only while a gesture may be in progress; slower when idle or off.
+                    if self.gestures.interval != self.gesture_interval:
+                        self.gesture_interval = self.gestures.interval
+                        user32.SetTimer(self.hwnd, 2, self.gesture_interval, None)
+            else:
+                self.poll()
             return 0
         if message == self.taskbar_created:  # Explorer restarted
             self._notify(NIM_ADD)
@@ -308,6 +331,11 @@ class Tray:
             user32.DestroyWindow(hwnd)
             return 0
         if message == WM_DESTROY:
+            if self.gestures:
+                try:
+                    self.gestures.close()
+                except OSError:
+                    pass
             shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._data(0)))
             if self.icon:
                 user32.DestroyIcon(self.icon)
@@ -329,6 +357,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if not 1 <= args.low <= 99 or args.interval < 30:
         parser.error("--low must be 1-99 and --interval at least 30 seconds.")
+    try:
+        # Physical pixels: crisp icons on scaled displays, and Look up's pointer
+        # position matches the screen coordinates UI Automation expects.
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        pass
     mutex = kernel32.CreateMutexW(None, False, "Local\\TrackpadFreeTray")
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         sys.exit(0)  # already running

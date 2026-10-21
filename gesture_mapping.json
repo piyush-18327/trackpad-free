@@ -1,0 +1,35 @@
+{
+  "build": 26200,
+  "source": "Empirical UI Automation Settings diffs on Windows 11 25H2 build 26200, 2026-10-21. See docs/gestures.md.",
+  "profiles": {
+    "mac": [
+      {"key":"", "name":"ThreeFingerUp", "after":{"type":4,"value":2}},
+      {"key":"", "name":"ThreeFingerDown", "after":{"type":4,"value":3}},
+      {"key":"", "name":"ThreeFingerLeft", "after":{"type":4,"value":4}},
+      {"key":"", "name":"ThreeFingerRight", "after":{"type":4,"value":4}},
+      {"key":"", "name":"ThreeFingerSlideEnabled", "after":{"type":4,"value":2}}
+    ],
+    "three_none": [
+      {"key":"", "name":"ThreeFingerUp", "after":{"type":4,"value":0}},
+      {"key":"", "name":"ThreeFingerDown", "after":{"type":4,"value":0}},
+      {"key":"", "name":"ThreeFingerLeft", "after":{"type":4,"value":0}},
+      {"key":"", "name":"ThreeFingerRight", "after":{"type":4,"value":0}},
+      {"key":"", "name":"ThreeFingerSlideEnabled", "after":{"type":4,"value":0}}
+    ],
+    "three_tap_none": [{"key":"", "name":"ThreeFingerTapEnabled", "after":{"type":4,"value":0}}],
+    "four_mac": [
+      {"key":"", "name":"FourFingerUp", "after":{"type":4,"value":2}},
+      {"key":"", "name":"FourFingerDown", "after":{"type":4,"value":3}},
+      {"key":"", "name":"FourFingerLeft", "after":{"type":4,"value":4}},
+      {"key":"", "name":"FourFingerRight", "after":{"type":4,"value":4}},
+      {"key":"", "name":"FourFingerSlideEnabled", "after":{"type":4,"value":2}}
+    ],
+    "four_none": [
+      {"key":"", "name":"FourFingerUp", "after":{"type":4,"value":0}},
+      {"key":"", "name":"FourFingerDown", "after":{"type":4,"value":0}},
+      {"key":"", "name":"FourFingerLeft", "after":{"type":4,"value":0}},
+      {"key":"", "name":"FourFingerRight", "after":{"type":4,"value":0}},
+      {"key":"", "name":"FourFingerSlideEnabled", "after":{"type":4,"value":0}}
+    ]
+  }
+}
