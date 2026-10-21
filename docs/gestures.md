@@ -25,6 +25,7 @@ Windows' own gestures to behave like a Mac.
 | Notification Center | Two fingers swipe in from the right edge | Win+N | None |
 | Launchpad | Four-finger pinch / spread | Start / show desktop | Four-finger swipes set to *Nothing* (the engine supplies Mac swipes when needed) |
 | Look up | Three-finger tap | Opens Bing with "define *word*" for the word under the pointer | Three-finger tap set to *Nothing* |
+| Screenshot | Five-finger double-tap (second lift within 0.6 s of the first) | Win+Shift+S: Windows' snipping overlay | None (Windows has no five-finger gestures) |
 
 ### Look up
 

@@ -45,6 +45,13 @@ class LookupTests(unittest.TestCase):
             self.assertIsNone(uia.clean_word(rejected), rejected)
 
 
+class ScreenshotTests(unittest.TestCase):
+    def test_screenshot_opens_the_snipping_overlay(self):
+        with patch.object(gesture_input, "shortcut", return_value=True) as shortcut:
+            InputSink().emit(Action("screenshot"))
+        shortcut.assert_called_once_with(gesture_input.VK_WIN, gesture_input.VK_SHIFT, ord("S"))
+
+
 class SmartZoomTests(unittest.TestCase):
     def test_zoom_state_is_tracked_per_window(self):
         sink, sent = InputSink(), []

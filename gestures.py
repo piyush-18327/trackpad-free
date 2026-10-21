@@ -35,7 +35,7 @@ class Action:
 
 DEFAULTS = {
     "three_finger_drag": False, "smart_zoom": False, "notification_center": False,
-    "launchpad": False, "lookup": False,
+    "launchpad": False, "lookup": False, "five_finger_screenshot": False,
     "drag_release_delay": 0.5, "tap_max_movement": 0.025, "tap_max_time": 0.25,
     "edge_width": 0.08, "drag_start_movement": 0.012, "drag_start_time": 0.35,
     "double_tap_time": 0.35, "swipe_distance": 0.12, "pinch_ratio": 0.25,
@@ -81,6 +81,7 @@ class Recognizer:
         self.dragging = False
         self.release_at = None
         self.pending_tap = None
+        self.pending_five = None  # lift time of a first five-finger tap
         self.device = None
         self.last_time = None
         self.last_frame_time = None
@@ -102,8 +103,14 @@ class Recognizer:
         self.dragging = False
         self.release_at = None
         self.pending_tap = None
+        self.pending_five = None
         self._clear_session()
         return actions
+
+    def _five_tap_window(self) -> float:
+        # Lift to lift: the pause between taps plus the second tap itself, since
+        # five fingers take longer to land than two.
+        return self.settings["double_tap_time"] + self.settings["tap_max_time"]
 
     def tick(self, now: float) -> list[Action]:
         result = []
@@ -117,6 +124,8 @@ class Recognizer:
             # Smart zoom owns two-finger taps; a single tap still right-clicks.
             result.append(Action("right_click"))
             self.pending_tap = None
+        if self.pending_five is not None and now > self.pending_five + self._five_tap_window():
+            self.pending_five = None  # a single five-finger tap does nothing
         return result
 
     def feed(self, frame: Frame) -> list[Action]:
@@ -136,6 +145,7 @@ class Recognizer:
         if not points:
             if self.dragging and self.release_at is None:
                 self.release_at = now + s["drag_release_delay"]
+            five_tap = False
             if self.start_time is not None and not self.blocked and not self.fired and not self.dragging:
                 if now - self.start_time <= s["tap_max_time"] and self.movement <= s["tap_max_movement"]:
                     if self.peak == 2 and s["smart_zoom"]:
@@ -150,6 +160,15 @@ class Recognizer:
                             self.pending_tap = (now, pos)
                     elif self.peak == 3 and s["lookup"]:
                         result.append(Action("lookup"))
+                    elif self.peak == 5 and s["five_finger_screenshot"]:
+                        five_tap = True
+                        if self.pending_five is not None:
+                            result.append(Action("screenshot"))
+                            self.pending_five = None
+                        else:
+                            self.pending_five = now
+            if self.start_time is not None and not five_tap:
+                self.pending_five = None  # any other touch in between breaks the double-tap
             self._clear_session()
             return result + self.tick(now)
         if self.blocked:

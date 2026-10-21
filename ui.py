@@ -61,15 +61,24 @@ def enable_dpi_awareness() -> None:
             pass
 
 
-def prefers_dark() -> bool:
-    choice = os.environ.get("TRACKPADFREE_THEME", "").lower()
-    if choice in ("dark", "light"):
-        return choice == "dark"
+THEME_MODES = ("system", "light", "dark")
+
+
+def windows_prefers_dark() -> bool:
+    """The Windows "app mode" (Settings > Personalization > Colors)."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
             return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
     except OSError:
         return False
+
+
+def initial_mode(saved: str | None = None) -> str:
+    """TRACKPADFREE_THEME (used by tools/screenshot.py) wins, then the saved choice, then Match Windows."""
+    for choice in (os.environ.get("TRACKPADFREE_THEME", "").lower(), saved):
+        if choice in THEME_MODES:
+            return choice
+    return "system"
 
 
 def battery_kind(level: int | None, low: int = 20) -> str:
@@ -98,11 +107,22 @@ def round_rect(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, ra
 
 
 class Theme:
-    def __init__(self, root: tk.Tk, dark: bool | None = None) -> None:
+    """Palette and ttk styles for one window, switchable while the app runs.
+
+    ttk widgets follow restyled styles by themselves; plain Tk widgets that
+    hold their own colors register a callback with on_change().
+    """
+
+    def __init__(self, root: tk.Tk, mode: str = "system") -> None:
         global _scale
         _scale = root.winfo_fpixels("1i") / 96
-        self.dark = prefers_dark() if dark is None else dark
+        self.root = root
+        self.mode = mode if mode in THEME_MODES else "system"
+        self.dark = self._resolve()
         self.c = DARK if self.dark else LIGHT
+        self._listeners: list = []
+        self._indicators: dict[tuple, tk.PhotoImage] = {}
+        self._indicator_pixels: dict[tuple, tuple] = {}
         families = set(tkfont.families(root))
 
         def pick(*names: str) -> str:
@@ -116,6 +136,48 @@ class Theme:
 
     def font(self, size: int, weight: str = "normal", display: bool = False) -> tuple:
         return (self.display_family if display else self.text_family, size, weight)
+
+    def _resolve(self) -> bool:
+        return windows_prefers_dark() if self.mode == "system" else self.mode == "dark"
+
+    def on_change(self, callback) -> None:
+        """Call `callback()` after every palette switch."""
+        self._listeners.append(callback)
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in THEME_MODES:
+            raise ValueError(f"Unknown theme mode: {mode}")
+        self.mode = mode
+        self.refresh()
+
+    def refresh(self) -> bool:
+        """Re-apply the palette if the effective theme changed; True if it did.
+
+        Also called periodically in Match Windows mode to follow Windows live.
+        """
+        dark = self._resolve()
+        if dark == self.dark:
+            return False
+        self.dark, self.c = dark, DARK if dark else LIGHT
+        self._configure(self.root)
+        self._recolor_popdowns(self.root)
+        self.style_titlebar(self.root)
+        for callback in list(self._listeners):
+            callback()
+        return True
+
+    def _recolor_popdowns(self, widget: tk.Misc) -> None:
+        """Combobox drop-down lists read the option database only when first built."""
+        c = self.c
+        for child in widget.winfo_children():
+            if child.winfo_class() == "TCombobox":
+                try:
+                    popdown = child.tk.eval(f"ttk::combobox::PopdownWindow {child}")
+                    child.tk.call(f"{popdown}.f.l", "configure", "-background", c["field"], "-foreground", c["text"],
+                                  "-selectbackground", c["accent"], "-selectforeground", c["accent_text"])
+                except tk.TclError:
+                    pass
+            self._recolor_popdowns(child)
 
     def _configure(self, root: tk.Tk) -> None:
         c, style = self.c, ttk.Style(root)
@@ -184,20 +246,23 @@ class Theme:
                   lightcolor=[("active", c["window"])], darkcolor=[("active", c["window"])],
                   foreground=[("disabled", c["disabled"]), ("pressed", c["accent_pressed"]), ("active", c["accent_hover"])])
 
-        # Fluent-style check boxes and radio buttons drawn as images.
-        self._images: list[tk.PhotoImage] = []
+        # Fluent-style check boxes and radio buttons drawn as images. The images
+        # are redrawn in place on a theme switch, so the elements keep using them.
+        states = {"off": (c["field"], c["field_border"], None), "hover": (c["field"], c["muted"], None),
+                  "on": (c["accent"], c["accent"], c["accent_text"]),
+                  "disabled_off": (c["neutral_bg"], c["border"], None),
+                  "disabled_on": (c["disabled"], c["disabled"], c["field"])}
         for name, shape in (("Checkbutton", "box"), ("Radiobutton", "circle")):
-            off = self._indicator(root, shape, c["field"], c["field_border"])
-            hover = self._indicator(root, shape, c["field"], c["muted"])
-            on = self._indicator(root, shape, c["accent"], c["accent"], c["accent_text"])
-            disabled_off = self._indicator(root, shape, c["neutral_bg"], c["border"])
-            disabled_on = self._indicator(root, shape, c["disabled"], c["disabled"], c["field"])
+            created = (name, "off") in self._indicators
+            images = {state: self._indicator(root, (name, state), shape, *colors) for state, colors in states.items()}
             element = f"Fluent.{name}.indicator"
-            try:
-                style.element_create(element, "image", off, ("disabled", "selected", disabled_on), ("disabled", disabled_off),
-                                     ("selected", on), ("active", hover), sticky="w")
-            except tk.TclError:
-                pass  # already created in this interpreter
+            if not created:
+                try:
+                    style.element_create(element, "image", images["off"], ("disabled", "selected", images["disabled_on"]),
+                                         ("disabled", images["disabled_off"]), ("selected", images["on"]),
+                                         ("active", images["hover"]), sticky="w")
+                except tk.TclError:
+                    pass  # already created in this interpreter
             style.layout(f"T{name}", [(f"{name}.padding", {"sticky": "nswe", "children": [
                 (element, {"side": "left", "sticky": ""}),
                 (f"{name}.focus", {"side": "left", "sticky": "w", "children": [(f"{name}.label", {"sticky": "nswe"})]}),
@@ -220,9 +285,29 @@ class Theme:
         style.configure("Busy.Horizontal.TProgressbar", background=c["accent"], troughcolor=c["neutral_bg"],
                         bordercolor=c["window"], lightcolor=c["accent"], darkcolor=c["accent"])
 
-    def _indicator(self, root: tk.Tk, shape: str, fill: str, border: str, mark: str | None = None) -> tk.PhotoImage:
-        """Anti-aliased check box or radio indicator, blended onto the window color, with a gap on the right."""
-        size, gap, samples = px(18), px(9), 4
+    def _indicator(self, root: tk.Tk, key: tuple, shape: str, fill: str, border: str, mark: str | None = None) -> tk.PhotoImage:
+        """Anti-aliased check box or radio indicator, blended onto the window color, with a gap on the right.
+
+        The same PhotoImage is reused for `key` and redrawn for the current
+        palette; rendered pixels are cached per palette, so switching is instant.
+        """
+        size, gap = px(18), px(9)
+        image = self._indicators.get(key)
+        if image is None:
+            image = self._indicators[key] = tk.PhotoImage(master=root, width=size + gap, height=size)
+        cached = (key, self.dark)
+        if cached not in self._indicator_pixels:
+            self._indicator_pixels[cached] = self._render_indicator(shape, fill, border, mark, size, gap)
+        rows, transparent = self._indicator_pixels[cached]
+        image.blank()
+        for y, row in enumerate(rows):
+            image.put(row, to=(0, y))
+        for x, y in transparent:  # PhotoImage.transparency_set needs Python 3.13+, so call Tk directly
+            image.tk.call(image.name, "transparency", "set", x, y, True)
+        return image
+
+    def _render_indicator(self, shape: str, fill: str, border: str, mark: str | None, size: int, gap: int) -> tuple:
+        samples = 4
         stroke = max(1.0, size * 0.075)
         background = self.c["window"]
         rgb = [tuple(int(color[i:i + 2], 16) for i in (1, 3, 5)) for color in (background, border, fill, mark or fill)]
@@ -248,8 +333,7 @@ class Theme:
                     return True
             return False
 
-        image = tk.PhotoImage(master=root, width=size + gap, height=size)
-        transparent = []
+        rows, transparent = [], []
         for y in range(size):
             row = []
             for x in range(size + gap):
@@ -268,11 +352,8 @@ class Theme:
                 row.append("#%02x%02x%02x" % tuple(round(channel) for channel in color))
                 if outer == 0:
                     transparent.append((x, y))
-            image.put("{" + " ".join(row) + "}", to=(0, y))
-        for x, y in transparent:  # PhotoImage.transparency_set needs Python 3.13+, so call Tk directly
-            image.tk.call(image.name, "transparency", "set", x, y, True)
-        self._images.append(image)
-        return image
+            rows.append("{" + " ".join(row) + "}")
+        return rows, transparent
 
     def style_titlebar(self, root: tk.Tk) -> None:
         """Match the Windows 11 title bar to the sidebar (dark mode aware)."""
@@ -323,6 +404,7 @@ class BatteryGauge(tk.Canvas):
                          highlightthickness=0, borderwidth=0)
         self.theme, self.level, self.low = theme, None, 20
         self.bind("<Configure>", lambda _event: self._draw())
+        theme.on_change(self._draw)
 
     def set(self, level: int | None, low: int = 20) -> None:
         self.level, self.low = level, low
@@ -331,6 +413,7 @@ class BatteryGauge(tk.Canvas):
     def _draw(self) -> None:
         self.delete("all")
         c = self.theme.c
+        self.configure(background=c["window"])
         width = max(self.winfo_width(), int(self["width"]))
         height = max(self.winfo_height(), int(self["height"]))
         stroke, nub = max(2, px(2.5)), px(6)
@@ -383,7 +466,10 @@ class _NavItem(tk.Frame):
         background = c["sidebar_active"] if self.active else c["sidebar_hover"] if hover else c["sidebar"]
         for widget in self.winfo_children() + [self]:
             widget.configure(background=background)
-        self.configure(highlightbackground=c["sidebar"])
+        for widget in (self.label, getattr(self, "icon", None)):
+            if widget is not None:
+                widget.configure(foreground=c["text"])
+        self.configure(highlightbackground=c["sidebar"], highlightcolor=c["accent"])
         self.indicator.configure(background=c["accent"] if self.active else background)
         self.label.configure(font=self.theme.font(10, "bold" if self.active else "normal"))
 
@@ -440,6 +526,12 @@ class NavBook(ttk.Frame):
         self._window = self.canvas.create_window(0, 0, anchor="nw")
         self.canvas.bind("<Configure>", self._resize)
         self.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        theme.on_change(self._recolor)
+
+    def _recolor(self) -> None:
+        self.canvas.configure(background=self.theme.c["window"])
+        for entry in self._pages:
+            entry["item"].set_active(entry["page"] is self._current)
 
     # ttk.Notebook-compatible API -------------------------------------------------
     def add(self, page: tk.Misc, text: str = "", subtitle: str = "", **_options) -> None:

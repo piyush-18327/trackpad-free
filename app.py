@@ -28,6 +28,25 @@ from version import __version__
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT / "assets"
 GESTURE_STATUS_STALE = 75  # seconds; the tray rewrites its status at least every 30 s
+THEME_LABELS = {"system": "Match Windows", "light": "Light", "dark": "Dark"}
+WINDOWS_THEME_CHECK = 3000  # ms between checks of the Windows app mode in Match Windows mode
+
+
+def preferences_path() -> Path:
+    return gesture_config.data_dir() / "app.json"
+
+
+def load_preferences() -> dict:
+    """App-wide choices such as the theme, in %APPDATA%\\TrackpadFree\\app.json."""
+    try:
+        data = json.loads(preferences_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_preferences(**changes) -> None:
+    gesture_config.atomic_json(preferences_path(), {**load_preferences(), **changes})
 
 
 def snapshot() -> dict:
@@ -66,7 +85,7 @@ class TrackpadApp(tk.Tk):
         ui.enable_dpi_awareness()
         super().__init__()
         self.title("Trackpad Free")
-        self.theme = ui.Theme(self)
+        self.theme = ui.Theme(self, ui.initial_mode(load_preferences().get("theme")))
         px = ui.px
         self.geometry(f"{px(1040)}x{px(760)}")
         self.minsize(px(860), px(560))
@@ -109,13 +128,47 @@ class TrackpadApp(tk.Tk):
         self.notice = ui.WrapLabel(footer, text="Ready to scan.", style="Muted.TLabel")
         self.notice.pack(side="left", fill="x", expand=True)
         self.busy_bar = ttk.Progressbar(footer, mode="indeterminate", length=px(96), style="Busy.Horizontal.TProgressbar")
-        self.side_battery = ttk.Label(self.tabs.sidebar_footer, text="Battery  —", style="SidebarMuted.TLabel")
+        side = self.tabs.sidebar_footer
+        ttk.Label(side, text="Appearance", style="SidebarMuted.TLabel").pack(anchor="w")
+        self.theme_choice = tk.StringVar(value=THEME_LABELS[self.theme.mode])
+        self.theme_picker = ttk.Combobox(side, textvariable=self.theme_choice, values=list(THEME_LABELS.values()),
+                                         state="readonly", width=16)
+        self.theme_picker.pack(fill="x", pady=(px(4), px(14)))
+        self.theme_picker.bind("<<ComboboxSelected>>", self._theme_selected)
+        self.side_battery = ttk.Label(side, text="Battery  —", style="SidebarMuted.TLabel")
         self.side_battery.pack(anchor="w")
         self.after(10, lambda: self.theme.style_titlebar(self))
+        self.after(WINDOWS_THEME_CHECK, self._follow_windows_theme)
         self.after(100, self._drain)
         if auto_scan:
             self.after(200, self.scan)
             self.after(60000, self._auto_refresh)
+
+    def _theme_selected(self, _event: tk.Event) -> None:
+        mode = next(mode for mode, label in THEME_LABELS.items() if label == self.theme_choice.get())
+        self.theme_picker.selection_clear()
+        self.set_theme(mode)
+
+    def set_theme(self, mode: str) -> None:
+        """Switch the theme now and remember it for next time."""
+        self.theme.set_mode(mode)
+        self.theme_choice.set(THEME_LABELS[mode])
+        try:
+            save_preferences(theme=mode)
+        except (OSError, KeyError) as error:
+            self.notice.configure(text=f"Appearance changed, but it couldn't be saved for next time: {error}")
+            return
+        self.notice.configure(text=f"Appearance: {THEME_LABELS[mode]}.")
+
+    def _follow_windows_theme(self) -> None:
+        if self.theme.mode == "system":
+            self.theme.refresh()  # no-op unless Windows switched between light and dark
+        self.after(WINDOWS_THEME_CHECK, self._follow_windows_theme)
+
+    def _recolor_diagnostics(self) -> None:
+        c = self.theme.c
+        self.diagnostics.configure(background=c["code_bg"], foreground=c["text"], insertbackground=c["text"],
+                                   selectbackground=c["accent"], selectforeground=c["accent_text"])
 
     def _icon(self, size: int) -> tk.PhotoImage | None:
         """The smallest pre-rendered icon at least `size` design pixels wide."""
@@ -280,6 +333,7 @@ class TrackpadApp(tk.Tk):
             "notification_center": "Notification Center — two fingers swipe inward from right edge",
             "launchpad": "Launchpad — four-finger pinch: Start; spread: desktop",
             "lookup": "Look up — three-finger tap: define the word under the pointer on Bing",
+            "five_finger_screenshot": "Screenshot — five-finger double-tap: Windows snipping overlay (Win+Shift+S)",
         }
         for name, label in labels.items():
             ttk.Checkbutton(card, text=label, variable=self.gesture_vars[name]).pack(anchor="w", pady=px(4))
@@ -383,13 +437,13 @@ class TrackpadApp(tk.Tk):
         self.install_button.configure(style="Accent.TButton" if downloaded and not precision else "TButton")
 
     def _build_diagnostics(self) -> None:
-        page, px, c = self.diagnostics_tab, ui.px, self.theme.c
+        page, px = self.diagnostics_tab, ui.px
         box = ttk.Frame(page, style="Card.TFrame", padding=1)
         box.pack(fill="both", expand=True)
         self.diagnostics = tk.Text(box, font=(self.theme.mono_family, 9), wrap="word", height=24, state="disabled",
-                                   background=c["code_bg"], foreground=c["text"], insertbackground=c["text"],
-                                   selectbackground=c["accent"], selectforeground=c["accent_text"],
                                    relief="flat", borderwidth=0, highlightthickness=0, padx=px(14), pady=px(12))
+        self._recolor_diagnostics()
+        self.theme.on_change(self._recolor_diagnostics)
         scrollbar = ttk.Scrollbar(box, orient="vertical", command=self.diagnostics.yview)
         self.diagnostics.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
@@ -624,8 +678,10 @@ class TrackpadApp(tk.Tk):
 
     def destroy(self) -> None:
         # Cancel the polling timers so they do not fire into a destroyed window.
+        # Cancel at the Tcl level: after_cancel() also deletes the callback's
+        # command, which the scheduling widget would then delete again on destroy.
         for job in self.tk.splitlist(self.tk.call("after", "info")):
-            self.after_cancel(job)
+            self.tk.call("after", "cancel", job)
         super().destroy()
 
     def restart_elevated(self) -> None:

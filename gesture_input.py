@@ -172,4 +172,5 @@ SHORTCUTS = {
     "notifications": (VK_WIN, ord('N')), "start": (VK_CTRL, 0x1B),
     "desktop": (VK_WIN, ord('D')), "task_view": (VK_WIN, 0x09),
     "desktop_left": (VK_CTRL, VK_WIN, 0x25), "desktop_right": (VK_CTRL, VK_WIN, 0x27),
+    "screenshot": (VK_WIN, VK_SHIFT, ord('S')),  # Snipping Tool's screen capture overlay
 }

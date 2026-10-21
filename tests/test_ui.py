@@ -1,12 +1,17 @@
 """Window smoke tests and icon checks; skipped where Tk cannot open a window."""
 
+import json
+import os
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import tkinter as tk
 from tkinter import ttk
 import unittest
+from unittest.mock import patch
 
+import gesture_config
 import ui
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,17 +54,69 @@ class IconTests(unittest.TestCase):
         self.assertTrue((ROOT / "assets" / "icon.ico").is_file())
 
 
+class ThemeModeTests(unittest.TestCase):
+    def test_initial_mode_precedence(self):
+        with patch.dict(os.environ, {"TRACKPADFREE_THEME": ""}):
+            self.assertEqual(ui.initial_mode(None), "system")
+            self.assertEqual(ui.initial_mode("dark"), "dark")
+            self.assertEqual(ui.initial_mode("purple"), "system")
+        with patch.dict(os.environ, {"TRACKPADFREE_THEME": "light"}):
+            self.assertEqual(ui.initial_mode("dark"), "light")  # screenshots force a theme
+
+
 class WindowTests(unittest.TestCase):
     def setUp(self):
+        # Never read or write the real %APPDATA% preferences, and ignore a forced theme.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.data = Path(folder.name)
+        for patcher in (patch.object(gesture_config, "data_dir", lambda: self.data),
+                        patch.dict(os.environ, {"TRACKPADFREE_THEME": ""})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.app = self.open_app()
+
+    def open_app(self):
         from app import TrackpadApp
         try:
-            self.app = TrackpadApp(auto_scan=False)
+            app = TrackpadApp(auto_scan=False)
         except tk.TclError as error:
             self.skipTest(f"Tk cannot open a window here: {error}")
-        self.app.withdraw()
+        app.withdraw()
+        return app
 
     def tearDown(self):
         self.app.destroy()
+
+    def colors(self):
+        item = self.app.tabs._pages[0]["item"]
+        return (ttk.Style(self.app).lookup("TFrame", "background"), self.app.tabs.canvas.cget("background"),
+                self.app.diagnostics.cget("background"), self.app.battery_gauge.cget("background"),
+                item.label.cget("foreground"))
+
+    def test_theme_switches_live(self):
+        for mode, palette in (("dark", ui.DARK), ("light", ui.LIGHT), ("dark", ui.DARK)):
+            self.app.set_theme(mode)
+            self.app.update()
+            self.assertEqual(self.colors(), (palette["window"], palette["window"], palette["code_bg"],
+                                             palette["window"], palette["text"]), mode)
+            self.assertEqual(self.app.theme_choice.get(), ui_label(mode))
+
+    def test_choice_is_remembered_for_next_start(self):
+        self.app.set_theme("dark")
+        self.assertEqual(json.loads((self.data / "app.json").read_text(encoding="utf-8")), {"theme": "dark"})
+        self.app.destroy()
+        self.app = self.open_app()
+        self.assertEqual((self.app.theme.mode, self.app.theme.dark), ("dark", True))
+        self.assertEqual(self.app.theme_choice.get(), "Dark")
+
+    def test_match_windows_follows_windows(self):
+        self.app.set_theme("system")
+        for windows_dark, palette in ((True, ui.DARK), (False, ui.LIGHT)):
+            with patch.object(ui, "windows_prefers_dark", return_value=windows_dark):
+                self.app._follow_windows_theme()
+            self.app.update()
+            self.assertEqual(self.colors()[0], palette["window"])
 
     def test_demo_snapshot_fills_every_page(self):
         self.app._show_snapshot(DEMO)
@@ -82,6 +139,11 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.app.tabs.select(), str(page))
         self.assertEqual(self.app.tabs.title.cget("text"), "Gestures")
         self.assertIn(str(page), self.app.tabs.tabs())
+
+
+def ui_label(mode):
+    from app import THEME_LABELS
+    return THEME_LABELS[mode]
 
 
 if __name__ == "__main__":

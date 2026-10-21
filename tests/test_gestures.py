@@ -12,6 +12,7 @@ def frame(t, points=(), **kwargs):
 TWO = ((.4, .4), (.5, .4))
 THREE = TWO + ((.6, .4),)
 FOUR = ((.3, .3), (.7, .3), (.3, .7), (.7, .7))
+FIVE = FOUR + ((.5, .85),)
 
 
 def move(points, dx=0, dy=0):
@@ -147,6 +148,38 @@ class GestureTests(unittest.TestCase):
         for t,p in [(0,THREE[:1]),(.02,THREE[:2]),(.04,THREE),(.1,THREE[:2]),(.12,THREE[:1])]:
             self.assertEqual(r.feed(frame(t,p)),[])
         self.assertEqual(r.feed(frame(.14,())),[Action("lookup")])
+
+    def five_taps(self, r, starts, points=FIVE):
+        results = []
+        for start in starts:
+            results += r.feed(frame(start, points))
+            results += r.feed(frame(start + .1, ()))
+        return results
+
+    def test_five_finger_double_tap_takes_a_screenshot_once(self):
+        r = Recognizer({"five_finger_screenshot": True})
+        self.assertEqual(self.five_taps(r, (0, .4)), [Action("screenshot")])
+        self.assertEqual(r.tick(5), [])
+
+    def test_five_finger_double_tap_is_off_by_default(self):
+        self.assertEqual(self.five_taps(Recognizer(), (0, .4)), [])
+
+    def test_single_or_slow_five_finger_taps_do_nothing(self):
+        r = Recognizer({"five_finger_screenshot": True})
+        self.assertEqual(self.five_taps(r, (0,)), [])
+        self.assertEqual(r.tick(.5), [])
+        self.assertEqual(self.five_taps(r, (2, 3)), [])  # second lift 1 s after the first
+
+    def test_other_touch_between_five_finger_taps_breaks_the_double_tap(self):
+        r = Recognizer({"five_finger_screenshot": True})
+        self.assertEqual(self.five_taps(r, (0,)) + self.five_taps(r, (.2,), TWO) + self.five_taps(r, (.35,)), [])
+
+    def test_four_fingers_or_moving_fingers_do_not_screenshot(self):
+        r = Recognizer({"five_finger_screenshot": True})
+        self.assertEqual(self.five_taps(r, (0, .4), FOUR), [])
+        r = Recognizer({"five_finger_screenshot": True})
+        results = r.feed(frame(0, FIVE)) + r.feed(frame(.05, move(FIVE, .05))) + r.feed(frame(.1, ()))
+        self.assertEqual(results + self.five_taps(r, (.4,)), [])
 
     def test_invalid_settings(self):
         for invalid in ({"edge_width":float('nan')},{"tap_max_time":True},{"lookup":1},{"x":True}):

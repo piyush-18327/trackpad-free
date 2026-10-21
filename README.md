@@ -51,10 +51,11 @@ display, a settings app) without a subscription.
 | Battery percentage over Bluetooth | ✅ once driver installed (tray icon, or app as admin) |
 | Tray icon with battery %, low-battery alerts at 20% and 10% | ✅ one-time admin setup, then no prompts |
 | Mac preset for Windows' own gestures (Task View, show desktop, switch desktops) | ✅ restorable; swipe changes need sign-out/in |
-| Mac gestures: three-finger drag, smart zoom, Notification Center edge swipe, Launchpad pinch, Look up | ✅ opt-in, run by the tray — see [docs/gestures.md](docs/gestures.md) |
+| Mac gestures: three-finger drag, smart zoom, Notification Center edge swipe, Launchpad pinch, Look up, five-finger double-tap screenshot | ✅ opt-in, run by the tray — see [docs/gestures.md](docs/gestures.md) |
 | Click strength / silent clicking | ✅ once driver installed (admin) |
 | Palm rejection, near-finger rejection options | ✅ once driver installed (admin) |
 | Pointer-speed, tap-to-click, scroll direction, gesture assignment | ✅ handled by Windows Settings (link in the app) |
+| Light / Dark / Match Windows appearance | ✅ sidebar → Appearance; switches instantly and is remembered |
 | USB-C wired connection | not yet tested |
 | Exact Magic Utilities feature parity | not established — see THIRD_PARTY.md |
 
